@@ -608,106 +608,8 @@ function createEndIcon() {
   });
 }
 
-// ─── OSRM 경로 조회 ───────────────────────────────────────────────────
-const CACHE_KEY = 'osrm_routes_v1';
-
-async function fetchOSRMRoute(fromCoord, toCoord) {
-  const url = `https://router.project-osrm.org/route/v1/driving/` +
-    `${fromCoord[1]},${fromCoord[0]};${toCoord[1]},${toCoord[0]}` +
-    `?overview=full&geometries=geojson`;
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 8000);
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
-    if (!res.ok) throw new Error('OSRM 응답 오류');
-    const data = await res.json();
-    if (data.routes && data.routes[0]) {
-      return data.routes[0].geometry.coordinates.map(([lng, lat]) => [lat, lng]);
-    }
-  } catch (e) {
-    clearTimeout(timeout);
-    console.warn('OSRM 실패, 직선으로 대체:', e);
-  }
-  return [fromCoord, toCoord];
-}
-
-// 동시 요청 수 제한 (concurrency pool)
-async function withConcurrency(tasks, limit) {
-  const results = new Array(tasks.length);
-  let idx = 0;
-  async function worker() {
-    while (idx < tasks.length) {
-      const i = idx++;
-      results[i] = await tasks[i]();
-    }
-  }
-  await Promise.all(Array.from({ length: limit }, worker));
-  return results;
-}
-
-// 로딩 오버레이
-const loadingOverlay = document.createElement('div');
-loadingOverlay.style.cssText = `
-  position:fixed; inset:0; background:rgba(26,18,8,0.7);
-  display:flex; flex-direction:column; align-items:center; justify-content:center;
-  z-index:9999; font-family:'DM Mono',monospace; color:#f5f0e8;
-`;
-loadingOverlay.innerHTML = `
-  <div style="font-size:28px; margin-bottom:16px;">🗺️</div>
-  <div style="font-size:14px; letter-spacing:0.15em; margin-bottom:12px;" id="loading-msg">실제 도로 경로 불러오는 중...</div>
-  <div id="loading-progress" style="font-size:11px; color:rgba(245,240,232,0.5);">0 / ${SEGMENTS.length} 구간</div>
-  <div style="margin-top:16px; width:200px; height:3px; background:rgba(255,255,255,0.1); border-radius:2px; overflow:hidden;">
-    <div id="loading-bar" style="height:100%; width:0%; background:#c8401a; transition:width 0.3s;"></div>
-  </div>
-`;
-document.body.appendChild(loadingOverlay);
-
-// 구간별 지도 요소 생성 (병렬 요청 + 캐싱)
-async function buildMapElements() {
-  const progressEl = document.getElementById('loading-progress');
-  const barEl = document.getElementById('loading-bar');
-  const msgEl = document.getElementById('loading-msg');
-
-  // 캐시 확인
-  let allRouteCoords;
-  try {
-    const cached = localStorage.getItem(CACHE_KEY);
-    if (cached) {
-      allRouteCoords = JSON.parse(cached);
-      msgEl.textContent = '저장된 경로 불러오는 중...';
-      progressEl.textContent = '캐시에서 즉시 로드';
-      barEl.style.width = '100%';
-    }
-  } catch (e) { /* localStorage 없으면 무시 */ }
-
-  // 캐시 없으면 병렬로 전체 요청
-  if (!allRouteCoords) {
-    let done = 0;
-    const tasks = SEGMENTS.map((seg) => async () => {
-      const fromCoord = STOPS[seg.from];
-      const toCoord   = STOPS[seg.to];
-      if (!fromCoord || !toCoord) {
-        done++;
-        progressEl.textContent = `${done} / ${SEGMENTS.length} 구간`;
-        barEl.style.width = `${(done / SEGMENTS.length) * 100}%`;
-        return [fromCoord, toCoord];
-      }
-      const coords = await fetchOSRMRoute(fromCoord, toCoord);
-      done++;
-      progressEl.textContent = `${done} / ${SEGMENTS.length} 구간`;
-      barEl.style.width = `${(done / SEGMENTS.length) * 100}%`;
-      return coords;
-    });
-    allRouteCoords = await withConcurrency(tasks, 6);
-
-    // 캐시 저장
-    try {
-      localStorage.setItem(CACHE_KEY, JSON.stringify(allRouteCoords));
-    } catch (e) { /* 용량 초과 등 무시 */ }
-  }
-
-  // 지도에 요소 추가
+// ─── 구간별 지도 요소 생성 ────────────────────────────────────────────
+function buildMapElements() {
   SEGMENTS.forEach((seg, idx) => {
     const fromCoord = STOPS[seg.from];
     const toCoord   = STOPS[seg.to];
@@ -715,9 +617,8 @@ async function buildMapElements() {
 
     const color = DAY_COLORS[seg.day];
     const dashArray = seg.type === 'rail' ? '8,5' : null;
-    const routeCoords = allRouteCoords[idx] || [fromCoord, toCoord];
 
-    const polyline = L.polyline(routeCoords, {
+    const polyline = L.polyline([fromCoord, toCoord], {
       color,
       weight: seg.type === 'rail' ? 3.5 : 3,
       opacity: 0.85,
@@ -742,11 +643,6 @@ async function buildMapElements() {
 
     mapElements.push({ day: seg.day, idx, polyline, markers: [fromMarker, toMarker] });
   });
-
-  // 로딩 완료
-  loadingOverlay.style.transition = 'opacity 0.5s';
-  loadingOverlay.style.opacity = '0';
-  setTimeout(() => loadingOverlay.remove(), 500);
 }
 
 buildMapElements();
