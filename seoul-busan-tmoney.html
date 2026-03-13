@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>서울→부산 시내버스 여행기</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+KR:wght@400;700;900&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+  :root {
+    --ink: #1a1208;
+    --paper: #f5f0e8;
+    --paper-dark: #e8e0d0;
+    --accent: #c8401a;
+    --accent2: #2a6496;
+    --day1: #e07b39;
+    --day2: #c8401a;
+    --day3: #8b2fc9;
+    --day4: #2a6496;
+    --day5: #1a7a4a;
+    --day6: #b8860b;
+    --day7: #c0392b;
+    --bus-color: #2a6496;
+    --rail-color: #c8401a;
+    --stamp-red: rgba(200,64,26,0.15);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Noto Serif KR', serif;
+    background: var(--paper);
+    color: var(--ink);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* 상단 헤더 */
+  header {
+    background: var(--ink);
+    color: var(--paper);
+    padding: 0 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 60px;
+    flex-shrink: 0;
+    border-bottom: 3px solid var(--accent);
+    position: relative;
+    overflow: hidden;
+  }
+  header::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 40px,
+      rgba(255,255,255,0.02) 40px,
+      rgba(255,255,255,0.02) 41px
+    );
+  }
+  .header-title {
+    font-size: 18px;
+    font-weight: 900;
+    letter-spacing: 0.05em;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .header-route {
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    color: rgba(245,240,232,0.5);
+    letter-spacing: 0.15em;
+  }
+  .header-stats {
+    display: flex;
+    gap: 24px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+  }
+  .stat-item {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+  }
+  .stat-value {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--accent);
+  }
+  .stat-label {
+    color: rgba(245,240,232,0.4);
+    font-size: 9px;
+    letter-spacing: 0.1em;
+  }
+
+  /* 메인 레이아웃 */
+  .main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* 사이드바 */
+  .sidebar {
+    width: 300px;
+    flex-shrink: 0;
+    background: var(--paper);
+    border-right: 2px solid var(--paper-dark);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .sidebar-header {
+    padding: 16px 18px 12px;
+    border-bottom: 1px solid var(--paper-dark);
+    background: var(--paper-dark);
+  }
+  .sidebar-header h2 {
+    font-size: 11px;
+    font-family: 'DM Mono', monospace;
+    letter-spacing: 0.2em;
+    color: rgba(26,18,8,0.5);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+  }
+
+  /* 날짜 필터 버튼 */
+  .day-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+  }
+  .day-btn {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    padding: 4px 8px;
+    border: 1.5px solid var(--paper-dark);
+    background: var(--paper);
+    cursor: pointer;
+    border-radius: 2px;
+    transition: all 0.15s;
+    color: var(--ink);
+    letter-spacing: 0.05em;
+  }
+  .day-btn:hover { background: var(--paper-dark); }
+  .day-btn.active {
+    color: var(--paper);
+    border-color: transparent;
+  }
+  .day-btn[data-day="all"].active { background: var(--ink); }
+  .day-btn[data-day="1"].active { background: var(--day1); }
+  .day-btn[data-day="2"].active { background: var(--day2); }
+  .day-btn[data-day="3"].active { background: var(--day3); }
+  .day-btn[data-day="4"].active { background: var(--day4); }
+  .day-btn[data-day="5"].active { background: var(--day5); }
+  .day-btn[data-day="6"].active { background: var(--day6); }
+  .day-btn[data-day="7"].active { background: var(--day7); }
+
+  /* 구간 목록 */
+  .segment-list {
+    flex: 1;
+    overflow-y: auto;
+    padding: 8px 0;
+  }
+  .segment-list::-webkit-scrollbar { width: 4px; }
+  .segment-list::-webkit-scrollbar-track { background: transparent; }
+  .segment-list::-webkit-scrollbar-thumb { background: var(--paper-dark); }
+
+  .day-group {
+    margin-bottom: 4px;
+  }
+  .day-label {
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 0.2em;
+    color: rgba(26,18,8,0.4);
+    padding: 8px 18px 4px;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .day-label::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--paper-dark);
+  }
+
+  .segment-item {
+    padding: 8px 18px;
+    cursor: pointer;
+    transition: background 0.1s;
+    border-left: 3px solid transparent;
+    position: relative;
+  }
+  .segment-item:hover { background: rgba(0,0,0,0.03); }
+  .segment-item.active { background: rgba(0,0,0,0.05); }
+
+  .seg-type-icon {
+    display: inline-block;
+    font-size: 9px;
+    font-family: 'DM Mono', monospace;
+    padding: 1px 5px;
+    border-radius: 2px;
+    margin-bottom: 3px;
+    font-weight: 500;
+    letter-spacing: 0.05em;
+  }
+  .seg-type-bus { background: #d4e8f7; color: var(--bus-color); }
+  .seg-type-rail { background: #fde8e4; color: var(--rail-color); }
+
+  .seg-route {
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.3;
+    margin-bottom: 2px;
+  }
+  .seg-stops {
+    font-size: 10px;
+    color: rgba(26,18,8,0.5);
+    line-height: 1.4;
+    font-family: 'DM Mono', monospace;
+  }
+  .seg-meta {
+    display: flex;
+    justify-content: space-between;
+    margin-top: 4px;
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    color: rgba(26,18,8,0.4);
+  }
+  .seg-cost {
+    font-weight: 500;
+    color: var(--accent);
+  }
+  .seg-cost.free { color: rgba(26,18,8,0.3); }
+
+  /* 하단 범례 */
+  .legend {
+    padding: 12px 18px;
+    border-top: 1px solid var(--paper-dark);
+    font-family: 'DM Mono', monospace;
+    font-size: 9px;
+    color: rgba(26,18,8,0.5);
+  }
+  .legend-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .legend-line {
+    width: 24px;
+    height: 3px;
+    border-radius: 2px;
+  }
+  .legend-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    border: 2px solid;
+  }
+
+  /* 지도 */
+  #map {
+    flex: 1;
+    background: #d8d0c0;
+  }
+
+  /* 타일 채도 제거 + 세피아 */
+  .map-tiles-desaturated {
+    filter: saturate(0%) brightness(88%) sepia(14%);
+  }
+
+  /* 팝업 커스텀 */
+  .leaflet-popup-content-wrapper {
+    background: var(--ink);
+    color: var(--paper);
+    border-radius: 4px;
+    box-shadow: 4px 4px 0 rgba(0,0,0,0.3);
+    border: none;
+    font-family: 'Noto Serif KR', serif;
+  }
+  .leaflet-popup-tip { background: var(--ink); }
+  .leaflet-popup-content {
+    margin: 12px 16px;
+    min-width: 180px;
+  }
+  .popup-route {
+    font-size: 13px;
+    font-weight: 700;
+    margin-bottom: 6px;
+    line-height: 1.4;
+  }
+  .popup-detail {
+    font-family: 'DM Mono', monospace;
+    font-size: 10px;
+    color: rgba(245,240,232,0.6);
+    line-height: 1.8;
+  }
+  .popup-cost {
+    margin-top: 8px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: #f4a261;
+    font-weight: 500;
+  }
+
+  /* 토스트 */
+  .toast {
+    position: fixed;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%) translateY(80px);
+    background: var(--ink);
+    color: var(--paper);
+    padding: 10px 20px;
+    font-family: 'DM Mono', monospace;
+    font-size: 11px;
+    border-radius: 2px;
+    transition: transform 0.3s;
+    z-index: 9999;
+    border-left: 3px solid var(--accent);
+  }
+  .toast.show { transform: translateX(-50%) translateY(0); }
+
+  /* 날짜별 색상 변수 */
+  [data-active-day="1"] .segment-item[data-day="1"] { border-left-color: var(--day1); }
+  [data-active-day="2"] .segment-item[data-day="2"] { border-left-color: var(--day2); }
+  [data-active-day="3"] .segment-item[data-day="3"] { border-left-color: var(--day3); }
+  [data-active-day="4"] .segment-item[data-day="4"] { border-left-color: var(--day4); }
+  [data-active-day="5"] .segment-item[data-day="5"] { border-left-color: var(--day5); }
+  [data-active-day="6"] .segment-item[data-day="6"] { border-left-color: var(--day6); }
+  [data-active-day="7"] .segment-item[data-day="7"] { border-left-color: var(--day7); }
+
+  .segment-item.hidden { display: none; }
+
+  @media (max-width: 640px) {
+    .sidebar { width: 260px; }
+    .header-stats { display: none; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="header-title">🚌 서울 → 부산, 시내버스로</div>
+    <div class="header-route">2026.02.28 — 2026.03.05 · 6박 7일</div>
+  </div>
+  <div class="header-stats">
+    <div class="stat-item">
+      <span class="stat-value" id="total-cost-header">—</span>
+      <span class="stat-label">총 교통비</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">34</span>
+      <span class="stat-label">총 구간</span>
+    </div>
+    <div class="stat-item">
+      <span class="stat-value">7</span>
+      <span class="stat-label">경유 도시</span>
+    </div>
+  </div>
+</header>
+
+<div class="main">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <h2>일차별 경로</h2>
+      <div class="day-filters">
+        <button class="day-btn active" data-day="all">전체</button>
+        <button class="day-btn" data-day="1">1일차<br><small style="font-size:8px">서울→평택</small></button>
+        <button class="day-btn" data-day="2">2일차<br><small style="font-size:8px">평택→세종</small></button>
+        <button class="day-btn" data-day="3">3일차<br><small style="font-size:8px">세종→대전</small></button>
+        <button class="day-btn" data-day="4">4일차<br><small style="font-size:8px">대전→영동</small></button>
+        <button class="day-btn" data-day="5">5일차<br><small style="font-size:8px">영동→대구</small></button>
+        <button class="day-btn" data-day="6">6일차<br><small style="font-size:8px">대구→경주</small></button>
+        <button class="day-btn" data-day="7">7일차<br><small style="font-size:8px">경주→부산</small></button>
+      </div>
+    </div>
+    <div class="segment-list" id="segment-list"></div>
+    <div class="legend">
+      <div class="legend-row">
+        <div class="legend-line" style="background:var(--bus-color)"></div>
+        <span>시내버스</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-line" style="background:var(--rail-color)"></div>
+        <span>광역전철 / 지하철</span>
+      </div>
+      <div class="legend-row">
+        <div class="legend-dot" style="border-color:var(--accent);background:white"></div>
+        <span>탑승/하차 지점</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="map"></div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ─── 데이터 ───────────────────────────────────────────────────────────
+const DAY_COLORS = {
+  1: '#e07b39', 2: '#c8401a', 3: '#8b2fc9',
+  4: '#2a6496', 5: '#1a7a4a', 6: '#b8860b', 7: '#c0392b'
+};
+
+const DAY_DATES = {
+  1: '2026.02.28', 2: '2026.03.01', 3: '2026.03.01 (계속)',
+  4: '2026.03.02', 5: '2026.03.03', 6: '2026.03.04', 7: '2026.03.05'
+};
+
+// 정류장 좌표 (OpenStreetMap 기반 수동 매핑)
+const STOPS = {
+  // 서울
+  '연희교차로': [37.5736, 126.9287],
+  '홍대입구역': [37.5574, 126.9249],
+  '신도림역': [37.5086, 126.8913],
+  // 수도권 1호선 경유
+  '서정리역': [37.0437, 127.0696],
+  '평택지제역': [36.9945, 127.0831],
+  // 평택
+  '기업은행': [36.9820, 127.0890],
+  '기업은행앞': [36.9820, 127.0890],
+  '학현2리': [36.9437, 127.1563],
+  '케원마트앞': [36.9580, 127.0920],
+  '평택역': [36.9922, 127.0854],
+  // 천안 - 세종
+  '천안역': [36.8090, 127.1502],
+  'KCC앞': [36.5045, 127.2457],
+  '성금교차로': [36.5130, 127.2130],
+  '세종예술고등학교': [36.4795, 127.2592],
+  '이응다리(금강보행교)': [36.4888, 127.2531],
+  // 세종 - 대전
+  '세종시청, 시의회, 교육청': [36.4800, 127.2890],
+  '반석역': [36.4235, 127.3456],
+  '정부청사역': [36.3747, 127.3864],
+  '녹원아파트': [36.3621, 127.3803],
+  '대전상공회의소': [36.3506, 127.3852],
+  '은하수네거리': [36.3701, 127.3936],
+  '사학연금회관': [36.3658, 127.3972],
+  // 대전 - 옥천
+  '판암역': [36.3278, 127.4505],
+  '옥천버스앞': [36.3035, 127.5713],
+  '옥천버스터미널': [36.3035, 127.5713],
+  // 옥천 - 영동
+  '가곡': [36.1578, 127.7158],
+  '양산': [36.1421, 127.7672],
+  '영동군청입구': [36.1739, 127.7838],
+  // 영동 - 김천
+  '구터미널': [36.1721, 127.7831],
+  '추풍령역': [36.2162, 127.8731],
+  '추풍령삼거리': [36.2170, 127.8750],
+  '김천역': [36.1396, 128.1136],
+  // 김천 - 구미 - 대구
+  '성내동': [36.1239, 128.0942],
+  '구미역': [36.1199, 128.3365],
+  '구미': [36.1199, 128.3365],
+  '대구역': [35.8780, 128.5983],
+  '중앙로역': [35.8710, 128.5966],
+  // 대구 - 경산
+  '부호역': [35.8101, 128.7355],
+  // 경산 - 영천
+  '영천터미널': [35.9776, 128.9381],
+  '영천초등학교': [35.9734, 128.9357],
+  // 영천 - 경주
+  '아화정류장.서면농협': [35.8843, 129.0648],
+  // 경주
+  '고속버스.시외버스터미널': [35.8562, 129.2243],
+  '문무왕릉.봉길해수욕장': [35.6120, 129.4736],
+  '주상절리': [35.7699, 129.4823],
+  // 울산
+  '문화예술회관': [35.5387, 129.3113],
+  '시티버스-문화예술회관': [35.5387, 129.3113],
+  '태화강역(1번 정류소)': [35.5429, 129.3244],
+  '태화강': [35.5429, 129.3244],
+  // 부산
+  '벡스코': [35.1694, 129.1285],
+  '금련산': [35.1634, 129.1161],
+};
+
+// 이동 구간 데이터
+const SEGMENTS = [
+  // 1일차 (02.28)
+  { day:1, transfer:1, type:'bus',  route:'7734번 버스',             from:'연희교차로',                  to:'홍대입구역',                    dep:'17:04', arr:'17:13', cost:1500 },
+  { day:1, transfer:1, type:'rail', route:'서울 2호선',               from:'홍대입구역',                  to:'신도림역',                      dep:'17:16', arr:'17:26', cost:50 },
+  { day:1, transfer:1, type:'rail', route:'수도권 1호선 (신창행 급행)', from:'신도림역',                    to:'서정리역',                      dep:'17:37', arr:'18:24', cost:0 },
+  { day:1, transfer:1, type:'rail', route:'수도권 1호선',             from:'서정리역',                    to:'평택지제역',                    dep:'18:52', arr:'18:56', cost:1200 },
+  { day:1, transfer:1, type:'bus',  route:'810번 버스',               from:'평택지제역',                  to:'기업은행',                      dep:'19:22', arr:'20:18', cost:700 },
+  // 2일차 (03.01 아침)
+  { day:2, transfer:2, type:'bus',  route:'810번 버스',               from:'기업은행앞',                  to:'학현2리',                       dep:'9:14',  arr:'9:32',  cost:1650 },
+  { day:2, transfer:3, type:'bus',  route:'98번 버스',                from:'케원마트앞',                  to:'평택역',                        dep:'10:43', arr:'11:26', cost:1850 },
+  { day:2, transfer:3, type:'rail', route:'수도권 1호선',             from:'평택역',                      to:'천안역',                        dep:'11:42', arr:'12:17', cost:500 },
+  { day:2, transfer:3, type:'bus',  route:'700번 버스',               from:'천안역',                      to:'KCC앞',                         dep:'12:55', arr:'13:26', cost:0 },
+  { day:2, transfer:4, type:'bus',  route:'991번 버스',               from:'KCC앞',                       to:'성금교차로',                    dep:'13:27', arr:'14:26', cost:1400 },
+  { day:2, transfer:5, type:'bus',  route:'274번 버스',               from:'세종예술고등학교',             to:'이응다리(금강보행교)',           dep:'15:41', arr:'15:45', cost:1400 },
+  // 3일차 (03.01 저녁)
+  { day:3, transfer:6, type:'bus',  route:'B4',                       from:'세종시청, 시의회, 교육청',    to:'반석역',                        dep:'17:01', arr:'17:14', cost:1700 },
+  { day:3, transfer:6, type:'rail', route:'대전 1호선',               from:'반석역',                      to:'정부청사역',                    dep:'17:17', arr:'17:43', cost:0 },
+  { day:3, transfer:7, type:'bus',  route:'105번 버스',               from:'녹원아파트',                  to:'대전상공회의소',                dep:'20:56', arr:'20:58', cost:1500 },
+  { day:3, transfer:8, type:'bus',  route:'605번 버스',               from:'은하수네거리',                to:'사학연금회관',                  dep:'22:28', arr:'22:32', cost:1500 },
+  // 4일차 (03.02)
+  { day:4, transfer:9, type:'rail', route:'대전 1호선',               from:'정부청사역',                  to:'판암역',                        dep:'9:50',  arr:'10:22', cost:1650 },
+  { day:4, transfer:9, type:'bus',  route:'607번 버스',               from:'판암역',                      to:'옥천버스앞',                    dep:'10:41', arr:'11:05', cost:450 },
+  { day:4, transfer:10, type:'bus', route:'711번 버스',               from:'옥천버스터미널',              to:'가곡',                          dep:'13:00', arr:'13:40', cost:1650 },
+  { day:4, transfer:11, type:'bus', route:'125번 버스',               from:'양산',                        to:'영동군청입구',                  dep:'14:12', arr:'14:40', cost:1650 },
+  // 5일차 (03.03)
+  { day:5, transfer:12, type:'bus', route:'612번 버스',               from:'구터미널',                    to:'추풍령역',                      dep:'8:43',  arr:'9:22',  cost:1650 },
+  { day:5, transfer:13, type:'bus', route:'11-6번 버스',              from:'추풍령삼거리',                to:'김천역',                        dep:'10:05', arr:'10:39', cost:1600 },
+  { day:5, transfer:13, type:'bus', route:'5000번 버스',              from:'성내동',                      to:'구미역',                        dep:'11:31', arr:'12:20', cost:0 },
+  { day:5, transfer:14, type:'rail', route:'대구 대경선',             from:'구미',                        to:'대구역',                        dep:'13:23', arr:'14:10', cost:2500 },
+  { day:5, transfer:14, type:'rail', route:'대구 1호선',              from:'대구역',                      to:'중앙로역',                      dep:'14:30', arr:'14:32', cost:750 },
+  // 6일차 (03.04)
+  { day:6, transfer:15, type:'rail', route:'대구 1호선',              from:'중앙로역',                    to:'부호역',                        dep:'10:58', arr:'11:34', cost:1500 },
+  { day:6, transfer:16, type:'bus', route:'555번 버스',               from:'부호역',                      to:'영천터미널',                    dep:'12:59', arr:'13:33', cost:3000 },
+  { day:6, transfer:17, type:'bus', route:'753번 버스',               from:'영천초등학교',                to:'아화정류장.서면농협',           dep:'13:45', arr:'14:11', cost:3000 },
+  { day:6, transfer:18, type:'bus', route:'300번 버스',               from:'아화정류장.서면농협',         to:'고속버스.시외버스터미널',       dep:'14:50', arr:'15:18', cost:1450 },
+  // 7일차 (03.05)
+  { day:7, transfer:19, type:'bus', route:'150번 버스',               from:'고속버스.시외버스터미널',     to:'문무왕릉.봉길해수욕장',         dep:'9:36',  arr:'10:35', cost:1450 },
+  { day:7, transfer:20, type:'bus', route:'160번 버스',               from:'문무왕릉.봉길해수욕장',       to:'주상절리',                      dep:'11:20', arr:'11:32', cost:1450 },
+  { day:7, transfer:21, type:'bus', route:'742번 버스',               from:'주상절리',                    to:'문화예술회관',                  dep:'11:57', arr:'13:07', cost:1500 },
+  { day:7, transfer:22, type:'bus', route:'721번 버스',               from:'시티버스-문화예술회관',       to:'태화강역(1번 정류소)',           dep:'14:02', arr:'14:14', cost:1500 },
+  { day:7, transfer:23, type:'rail', route:'부산 동해선',             from:'태화강',                      to:'벡스코',                        dep:'14:42', arr:'15:37', cost:2600 },
+  { day:7, transfer:23, type:'rail', route:'부산 2호선',              from:'벡스코',                      to:'금련산',                        dep:'15:49', arr:'15:58', cost:0 },
+];
+
+// ─── 총 비용 계산 ─────────────────────────────────────────────────────
+const totalCost = SEGMENTS.reduce((s, seg) => s + seg.cost, 0);
+document.getElementById('total-cost-header').textContent =
+  totalCost.toLocaleString() + '원';
+
+// ─── 지도 초기화 ──────────────────────────────────────────────────────
+// 남한 경계 (위도 33.0~38.9, 경도 124.5~130.0)
+const KOREA_BOUNDS = L.latLngBounds(
+  L.latLng(33.0, 124.5),
+  L.latLng(38.9, 130.0)
+);
+
+const map = L.map('map', {
+  center: [36.5, 127.8],
+  zoom: 7,
+  minZoom: 7,
+  maxZoom: 17,
+  maxBounds: KOREA_BOUNDS,
+  maxBoundsViscosity: 1.0,
+  zoomControl: true,
+});
+
+// 채도 제거 + 세피아 톤으로 경로 시인성 향상
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+  maxZoom: 17,
+  className: 'map-tiles-desaturated',
+}).addTo(map);
+
+// ─── 지도 요소 저장 ───────────────────────────────────────────────────
+const mapElements = []; // { day, polyline, markers[] }
+
+function createDotIcon(color) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:10px;height:10px;border-radius:50%;
+      background:white;border:2.5px solid ${color};
+      box-shadow:0 1px 3px rgba(0,0,0,0.3);
+    "></div>`,
+    iconSize: [10, 10],
+    iconAnchor: [5, 5],
+  });
+}
+
+function createStartIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:14px;height:14px;border-radius:50%;
+      background:#1a1208;border:3px solid #e07b39;
+      box-shadow:0 2px 6px rgba(0,0,0,0.4);
+    "></div>`,
+    iconSize: [14, 14],
+    iconAnchor: [7, 7],
+  });
+}
+
+function createEndIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:16px;height:16px;border-radius:50%;
+      background:#c8401a;border:3px solid white;
+      box-shadow:0 2px 6px rgba(0,0,0,0.5);
+    "></div>`,
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+  });
+}
+
+// ─── OSRM 경로 조회 ───────────────────────────────────────────────────
+async function fetchOSRMRoute(fromCoord, toCoord) {
+  // OSRM: [lat,lng] → [lng,lat] 순서
+  const url = `https://router.project-osrm.org/route/v1/driving/` +
+    `${fromCoord[1]},${fromCoord[0]};${toCoord[1]},${toCoord[0]}` +
+    `?overview=full&geometries=geojson`;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('OSRM 응답 오류');
+    const data = await res.json();
+    if (data.routes && data.routes[0]) {
+      // GeoJSON coordinates: [lng, lat] → Leaflet [lat, lng]
+      return data.routes[0].geometry.coordinates.map(([lng, lat]) => [lat, lng]);
+    }
+  } catch (e) {
+    console.warn('OSRM 실패, 직선으로 대체:', e);
+  }
+  return [fromCoord, toCoord]; // 실패 시 직선 fallback
+}
+
+// 로딩 오버레이
+const loadingOverlay = document.createElement('div');
+loadingOverlay.style.cssText = `
+  position:fixed; inset:0; background:rgba(26,18,8,0.7);
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  z-index:9999; font-family:'DM Mono',monospace; color:#f5f0e8;
+`;
+loadingOverlay.innerHTML = `
+  <div style="font-size:28px; margin-bottom:16px;">🗺️</div>
+  <div style="font-size:14px; letter-spacing:0.15em; margin-bottom:12px;">실제 도로 경로 불러오는 중...</div>
+  <div id="loading-progress" style="font-size:11px; color:rgba(245,240,232,0.5);">0 / ${SEGMENTS.length} 구간</div>
+  <div style="margin-top:16px; width:200px; height:3px; background:rgba(255,255,255,0.1); border-radius:2px; overflow:hidden;">
+    <div id="loading-bar" style="height:100%; width:0%; background:#c8401a; transition:width 0.3s;"></div>
+  </div>
+`;
+document.body.appendChild(loadingOverlay);
+
+// 구간별 지도 요소 생성 (비동기)
+async function buildMapElements() {
+  let done = 0;
+  const progressEl = document.getElementById('loading-progress');
+  const barEl = document.getElementById('loading-bar');
+
+  for (let idx = 0; idx < SEGMENTS.length; idx++) {
+    const seg = SEGMENTS[idx];
+    const fromCoord = STOPS[seg.from];
+    const toCoord   = STOPS[seg.to];
+    if (!fromCoord || !toCoord) { done++; continue; }
+
+    const color = DAY_COLORS[seg.day];
+    const dashArray = seg.type === 'rail' ? '8,5' : null;
+
+    // OSRM으로 실제 도로 경로 조회
+    const routeCoords = await fetchOSRMRoute(fromCoord, toCoord);
+
+    const polyline = L.polyline(routeCoords, {
+      color,
+      weight: seg.type === 'rail' ? 3.5 : 3,
+      opacity: 0.85,
+      dashArray,
+    }).addTo(map);
+
+    const popupHtml = `
+      <div class="popup-route">${seg.route}</div>
+      <div class="popup-detail">
+        📍 ${seg.from}<br>
+        → ${seg.to}<br>
+        🕐 ${seg.dep} ~ ${seg.arr}
+      </div>
+      <div class="popup-cost">${seg.cost === 0 ? '환승 무료' : seg.cost.toLocaleString() + '원'}</div>
+    `;
+    polyline.bindPopup(popupHtml);
+
+    const fromMarker = L.marker(fromCoord, { icon: createDotIcon(color) }).addTo(map);
+    const toMarker   = L.marker(toCoord,   { icon: createDotIcon(color) }).addTo(map);
+    fromMarker.bindPopup(popupHtml);
+    toMarker.bindPopup(popupHtml);
+
+    mapElements.push({ day: seg.day, idx, polyline, markers: [fromMarker, toMarker] });
+
+    // 진행률 업데이트
+    done++;
+    progressEl.textContent = `${done} / ${SEGMENTS.length} 구간`;
+    barEl.style.width = `${(done / SEGMENTS.length) * 100}%`;
+
+    // OSRM 서버 부하 방지: 구간 사이 짧은 대기
+    await new Promise(r => setTimeout(r, 120));
+  }
+
+  // 로딩 완료
+  loadingOverlay.style.transition = 'opacity 0.5s';
+  loadingOverlay.style.opacity = '0';
+  setTimeout(() => loadingOverlay.remove(), 500);
+}
+
+buildMapElements();
+
+// 출발지 / 도착지 마커
+const startMarker = L.marker(STOPS['연희교차로'], { icon: createStartIcon(), zIndexOffset: 1000 })
+  .addTo(map).bindPopup('<div class="popup-route">🚌 출발지</div><div class="popup-detail">연희교차로, 서울<br>2026.02.28 17:04</div>');
+
+const endMarker = L.marker(STOPS['금련산'], { icon: createEndIcon(), zIndexOffset: 1000 })
+  .addTo(map).bindPopup('<div class="popup-route">🎉 도착지</div><div class="popup-detail">금련산역, 부산<br>2026.03.05 15:58</div>');
+
+// ─── 사이드바 구간 목록 생성 ──────────────────────────────────────────
+const listEl = document.getElementById('segment-list');
+
+const dayGroups = {};
+SEGMENTS.forEach((seg, idx) => {
+  if (!dayGroups[seg.day]) dayGroups[seg.day] = [];
+  dayGroups[seg.day].push({ ...seg, idx });
+});
+
+const dayTitles = {
+  1: '1일차 · 02.28 · 서울 → 평택',
+  2: '2일차 · 03.01 · 평택 → 세종',
+  3: '3일차 · 03.01 저녁 · 세종 → 대전',
+  4: '4일차 · 03.02 · 대전 → 영동',
+  5: '5일차 · 03.03 · 영동 → 대구',
+  6: '6일차 · 03.04 · 대구 → 경주',
+  7: '7일차 · 03.05 · 경주 → 부산',
+};
+
+Object.keys(dayGroups).sort().forEach(day => {
+  const grp = document.createElement('div');
+  grp.className = 'day-group';
+  grp.dataset.day = day;
+
+  const label = document.createElement('div');
+  label.className = 'day-label';
+  label.style.color = DAY_COLORS[day];
+  label.textContent = dayTitles[day];
+  grp.appendChild(label);
+
+  const segs = dayGroups[day];
+  const dayCost = segs.reduce((s, seg) => s + seg.cost, 0);
+
+  segs.forEach(seg => {
+    const item = document.createElement('div');
+    item.className = 'segment-item';
+    item.dataset.day = day;
+    item.dataset.idx = seg.idx;
+
+    const typeLabel = seg.type === 'bus' ? '버스' : '전철/지하철';
+    const typeClass = seg.type === 'bus' ? 'seg-type-bus' : 'seg-type-rail';
+    const costStr = seg.cost === 0 ? '환승 무료' : seg.cost.toLocaleString() + '원';
+    const costClass = seg.cost === 0 ? 'free' : '';
+
+    item.innerHTML = `
+      <span class="seg-type-icon ${typeClass}">${typeLabel}</span>
+      <div class="seg-route">${seg.route}</div>
+      <div class="seg-stops">${seg.from}<br>→ ${seg.to}</div>
+      <div class="seg-meta">
+        <span>${seg.dep} ~ ${seg.arr}</span>
+        <span class="seg-cost ${costClass}">${costStr}</span>
+      </div>
+    `;
+
+    item.addEventListener('click', () => {
+      const fromCoord = STOPS[seg.from];
+      const toCoord   = STOPS[seg.to];
+      if (fromCoord && toCoord) {
+        const bounds = L.latLngBounds([fromCoord, toCoord]).pad(0.3);
+        map.fitBounds(bounds);
+        mapElements.find(e => e.idx === seg.idx)?.polyline.openPopup();
+      }
+      document.querySelectorAll('.segment-item').forEach(el => el.classList.remove('active'));
+      item.classList.add('active');
+    });
+
+    grp.appendChild(item);
+  });
+
+  // 일차 소계
+  const subtotal = document.createElement('div');
+  subtotal.style.cssText = 'padding:4px 18px 8px; font-family:"DM Mono",monospace; font-size:9px; color:rgba(26,18,8,0.4); text-align:right;';
+  subtotal.textContent = `일차 소계: ${dayCost.toLocaleString()}원`;
+  grp.appendChild(subtotal);
+
+  listEl.appendChild(grp);
+});
+
+// ─── 날짜 필터 ────────────────────────────────────────────────────────
+let activeDay = 'all';
+
+document.querySelectorAll('.day-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const day = btn.dataset.day;
+    activeDay = day;
+
+    document.querySelectorAll('.day-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+
+    // 사이드바 필터
+    document.querySelectorAll('.day-group').forEach(grp => {
+      grp.style.display = (day === 'all' || grp.dataset.day === day) ? '' : 'none';
+    });
+
+    // 지도 레이어 필터 + 줌
+    const visibleBounds = [];
+    mapElements.forEach(el => {
+      const show = day === 'all' || String(el.day) === day;
+      if (show) {
+        el.polyline.setStyle({ opacity: 0.85 });
+        el.markers.forEach(m => m.setOpacity(1));
+        el.polyline.getLatLngs().forEach(ll => visibleBounds.push(ll));
+      } else {
+        el.polyline.setStyle({ opacity: 0.05 });
+        el.markers.forEach(m => m.setOpacity(0.05));
+      }
+    });
+
+    if (visibleBounds.length > 0) {
+      map.fitBounds(L.latLngBounds(visibleBounds).pad(0.15));
+    }
+
+    // 시작/종료 마커
+    startMarker.setOpacity(day === 'all' || day === '1' ? 1 : 0.1);
+    endMarker.setOpacity(day === 'all' || day === '7' ? 1 : 0.1);
+  });
+});
+</script>
+</body>
+</html>
