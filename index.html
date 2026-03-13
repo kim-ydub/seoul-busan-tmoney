@@ -615,17 +615,35 @@ async function fetchOSRMRoute(fromCoord, toCoord) {
   const url = `https://router.project-osrm.org/route/v1/driving/` +
     `${fromCoord[1]},${fromCoord[0]};${toCoord[1]},${toCoord[0]}` +
     `?overview=full&geometries=geojson`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
   try {
-    const res = await fetch(url);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeout);
     if (!res.ok) throw new Error('OSRM 응답 오류');
     const data = await res.json();
     if (data.routes && data.routes[0]) {
       return data.routes[0].geometry.coordinates.map(([lng, lat]) => [lat, lng]);
     }
   } catch (e) {
+    clearTimeout(timeout);
     console.warn('OSRM 실패, 직선으로 대체:', e);
   }
   return [fromCoord, toCoord];
+}
+
+// 동시 요청 수 제한 (concurrency pool)
+async function withConcurrency(tasks, limit) {
+  const results = new Array(tasks.length);
+  let idx = 0;
+  async function worker() {
+    while (idx < tasks.length) {
+      const i = idx++;
+      results[i] = await tasks[i]();
+    }
+  }
+  await Promise.all(Array.from({ length: limit }, worker));
+  return results;
 }
 
 // 로딩 오버레이
@@ -666,7 +684,7 @@ async function buildMapElements() {
   // 캐시 없으면 병렬로 전체 요청
   if (!allRouteCoords) {
     let done = 0;
-    const promises = SEGMENTS.map(async (seg) => {
+    const tasks = SEGMENTS.map((seg) => async () => {
       const fromCoord = STOPS[seg.from];
       const toCoord   = STOPS[seg.to];
       if (!fromCoord || !toCoord) {
@@ -681,7 +699,7 @@ async function buildMapElements() {
       barEl.style.width = `${(done / SEGMENTS.length) * 100}%`;
       return coords;
     });
-    allRouteCoords = await Promise.all(promises);
+    allRouteCoords = await withConcurrency(tasks, 6);
 
     // 캐시 저장
     try {
