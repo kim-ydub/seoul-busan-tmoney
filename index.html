@@ -609,8 +609,9 @@ function createEndIcon() {
 }
 
 // ─── OSRM 경로 조회 ───────────────────────────────────────────────────
+const CACHE_KEY = 'osrm_routes_v1';
+
 async function fetchOSRMRoute(fromCoord, toCoord) {
-  // OSRM: [lat,lng] → [lng,lat] 순서
   const url = `https://router.project-osrm.org/route/v1/driving/` +
     `${fromCoord[1]},${fromCoord[0]};${toCoord[1]},${toCoord[0]}` +
     `?overview=full&geometries=geojson`;
@@ -619,13 +620,12 @@ async function fetchOSRMRoute(fromCoord, toCoord) {
     if (!res.ok) throw new Error('OSRM 응답 오류');
     const data = await res.json();
     if (data.routes && data.routes[0]) {
-      // GeoJSON coordinates: [lng, lat] → Leaflet [lat, lng]
       return data.routes[0].geometry.coordinates.map(([lng, lat]) => [lat, lng]);
     }
   } catch (e) {
     console.warn('OSRM 실패, 직선으로 대체:', e);
   }
-  return [fromCoord, toCoord]; // 실패 시 직선 fallback
+  return [fromCoord, toCoord];
 }
 
 // 로딩 오버레이
@@ -637,7 +637,7 @@ loadingOverlay.style.cssText = `
 `;
 loadingOverlay.innerHTML = `
   <div style="font-size:28px; margin-bottom:16px;">🗺️</div>
-  <div style="font-size:14px; letter-spacing:0.15em; margin-bottom:12px;">실제 도로 경로 불러오는 중...</div>
+  <div style="font-size:14px; letter-spacing:0.15em; margin-bottom:12px;" id="loading-msg">실제 도로 경로 불러오는 중...</div>
   <div id="loading-progress" style="font-size:11px; color:rgba(245,240,232,0.5);">0 / ${SEGMENTS.length} 구간</div>
   <div style="margin-top:16px; width:200px; height:3px; background:rgba(255,255,255,0.1); border-radius:2px; overflow:hidden;">
     <div id="loading-bar" style="height:100%; width:0%; background:#c8401a; transition:width 0.3s;"></div>
@@ -645,23 +645,59 @@ loadingOverlay.innerHTML = `
 `;
 document.body.appendChild(loadingOverlay);
 
-// 구간별 지도 요소 생성 (비동기)
+// 구간별 지도 요소 생성 (병렬 요청 + 캐싱)
 async function buildMapElements() {
-  let done = 0;
   const progressEl = document.getElementById('loading-progress');
   const barEl = document.getElementById('loading-bar');
+  const msgEl = document.getElementById('loading-msg');
 
-  for (let idx = 0; idx < SEGMENTS.length; idx++) {
-    const seg = SEGMENTS[idx];
+  // 캐시 확인
+  let allRouteCoords;
+  try {
+    const cached = localStorage.getItem(CACHE_KEY);
+    if (cached) {
+      allRouteCoords = JSON.parse(cached);
+      msgEl.textContent = '저장된 경로 불러오는 중...';
+      progressEl.textContent = '캐시에서 즉시 로드';
+      barEl.style.width = '100%';
+    }
+  } catch (e) { /* localStorage 없으면 무시 */ }
+
+  // 캐시 없으면 병렬로 전체 요청
+  if (!allRouteCoords) {
+    let done = 0;
+    const promises = SEGMENTS.map(async (seg) => {
+      const fromCoord = STOPS[seg.from];
+      const toCoord   = STOPS[seg.to];
+      if (!fromCoord || !toCoord) {
+        done++;
+        progressEl.textContent = `${done} / ${SEGMENTS.length} 구간`;
+        barEl.style.width = `${(done / SEGMENTS.length) * 100}%`;
+        return [fromCoord, toCoord];
+      }
+      const coords = await fetchOSRMRoute(fromCoord, toCoord);
+      done++;
+      progressEl.textContent = `${done} / ${SEGMENTS.length} 구간`;
+      barEl.style.width = `${(done / SEGMENTS.length) * 100}%`;
+      return coords;
+    });
+    allRouteCoords = await Promise.all(promises);
+
+    // 캐시 저장
+    try {
+      localStorage.setItem(CACHE_KEY, JSON.stringify(allRouteCoords));
+    } catch (e) { /* 용량 초과 등 무시 */ }
+  }
+
+  // 지도에 요소 추가
+  SEGMENTS.forEach((seg, idx) => {
     const fromCoord = STOPS[seg.from];
     const toCoord   = STOPS[seg.to];
-    if (!fromCoord || !toCoord) { done++; continue; }
+    if (!fromCoord || !toCoord) return;
 
     const color = DAY_COLORS[seg.day];
     const dashArray = seg.type === 'rail' ? '8,5' : null;
-
-    // OSRM으로 실제 도로 경로 조회
-    const routeCoords = await fetchOSRMRoute(fromCoord, toCoord);
+    const routeCoords = allRouteCoords[idx] || [fromCoord, toCoord];
 
     const polyline = L.polyline(routeCoords, {
       color,
@@ -687,15 +723,7 @@ async function buildMapElements() {
     toMarker.bindPopup(popupHtml);
 
     mapElements.push({ day: seg.day, idx, polyline, markers: [fromMarker, toMarker] });
-
-    // 진행률 업데이트
-    done++;
-    progressEl.textContent = `${done} / ${SEGMENTS.length} 구간`;
-    barEl.style.width = `${(done / SEGMENTS.length) * 100}%`;
-
-    // OSRM 서버 부하 방지: 구간 사이 짧은 대기
-    await new Promise(r => setTimeout(r, 120));
-  }
+  });
 
   // 로딩 완료
   loadingOverlay.style.transition = 'opacity 0.5s';
